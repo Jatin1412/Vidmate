@@ -1,1 +1,1 @@
-export const DB_NAME = "V-Mate"
+export const DB_NAME = "Vidmate"
