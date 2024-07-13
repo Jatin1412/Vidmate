@@ -9,8 +9,8 @@ app.use(cors({
     optionsSuccessStatus: 200
 }))
 
-app.use(express.json({limit: "30kb"}))
-app.use(express.urlencoded({extended: true, optionsSuccessStatus: 201, limit: "30kb"}))
+app.use(express.json())
+app.use(express.urlencoded({extended: true}))
 app.use(express.static("public"))
 app.use(cookieParser())
 

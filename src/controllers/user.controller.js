@@ -9,8 +9,9 @@ const generateAccessAndRefreshTokens = async (userId) => {
     const user = await User.findById(userId);
 
     const accessToken = user.generateAccessToken();
-    const refreshToken = user.generaterefreshToken();
+    const refreshToken = user.generateRefreshToken();
 
+    user.accessToken = accessToken;
     user.refreshToken = refreshToken;
     await user.save({ ValidateBeforeSave: false });
 
@@ -96,29 +97,29 @@ const registerUser = asyncHandler(async (req, res) => {
 const loginUser = asyncHandler(async (req, res) => {
   const { userName, email, password } = req.body;
 
-  if (!userName || !email) {
-    throw new ApiError(400, "username or email is required");
+  if (!(userName || email)) {
+    throw new ApiError(400, "email and userName is required :)");
   }
 
-  const findUser = await User.findOne({
-    $or: [{ userName }, { email }],
-  });
+  const user = await User.findOne({ 
+    $or : [{userName}, {email}]
+   });
 
-  if (!findUser) {
+  if (!user) {
     throw new ApiError(404, "User does not exist");
   }
 
-  const isPasswordValid = await findUser.isPasswordCorrect(password);
+  const isPasswordValid = await user.isPasswordCorrect(password);
 
   if (!isPasswordValid) {
     throw new ApiError(401, "Password is incorrect");
   }
 
   const { accessToken, refreshToken } = await generateAccessAndRefreshTokens(
-    findUser._id
+    user._id
   );
 
-  const loggedInUser = await User.findById(findUser._id).select(
+  const loggedInUser = await User.findById(user._id).select(
     "-password -refreshToken"
   );
 
@@ -148,8 +149,8 @@ const logoutUser = asyncHandler(async (req, res) => {
   await User.findByIdAndUpdate(
     req.user._id,
     {
-      $set: {
-        refreshToken: undefined,
+      $unset : {
+        refreshToken: 1,
       },
     },
     {
@@ -169,7 +170,11 @@ const logoutUser = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, {}, "User logged out"));
 });
 
-const changeCurrentPassword = asyncHandler(async (req, res) => {  
+const refreshAccessToken = asyncHandler(async (req, res) => {
+
+})
+
+const changeCurrentPassword = asyncHandler(async (req, res) => {
   const { oldPassword, newPassword } = req.body;
 
   const user = await User.findById(req.user?._id);
@@ -220,62 +225,131 @@ const updateAccountDetails = asyncHandler(async (req, res) => {
 const updateUserAvatar = asyncHandler(async (req, res) => {
   const avatarLocalPath = req.file?.path;
 
-  if(!avatarLocalPath){
-    throw new ApiError(400, "Avater image is missing :)")
+  if (!avatarLocalPath) {
+    throw new ApiError(400, "Avater image is missing :)");
   }
 
   const avatar = await uploadOnCloudinary(avatarLocalPath);
 
   if (!avatar.url) {
-    throw new ApiError(400, "Error while uploading avatar image :)")
+    throw new ApiError(400, "Error while uploading avatar image :)");
   }
-  
-const user =  await User.findByIdAndUpdate(
+
+  const user = await User.findByIdAndUpdate(
     req.user?._id,
     {
       $set: {
-        avatar: avatar.url
-      }
+        avatar: avatar.url,
+      },
     },
-    {new: true}
-  ).select("-password")
+    { new: true }
+  ).select("-password");
 
   return res
-  .status(200)
-  .json(
-    new ApiResponse(200, user, "Avatar Image updated successfully :)")
-  )
+    .status(200)
+    .json(new ApiResponse(200, user, "Avatar Image updated successfully :)"));
 });
 
 const updateUserCoverImage = asyncHandler(async (req, res) => {
   const coverImageLocalPath = req.file?.path;
 
-  if(!coverImageLocalPath){
-    throw new ApiError(400, "CoverImage image is missing :)")
+  if (!coverImageLocalPath) {
+    throw new ApiError(400, "CoverImage image is missing :)");
   }
 
   const coverImage = await uploadOnCloudinary(coverImageLocalPath);
 
   if (!coverImage.url) {
-    throw new ApiError(400, "Error while uploading CoverImage :)")
+    throw new ApiError(400, "Error while uploading CoverImage :)");
   }
-  
-const user = await User.findByIdAndUpdate(
+
+  const user = await User.findByIdAndUpdate(
     req.user?._id,
     {
       $set: {
-        coverImage: coverImage.url
-      }
+        coverImage: coverImage.url,
+      },
     },
-    {new: true}
-  ).select("-password")
+    { new: true }
+  ).select("-password");
 
   return res
-  .status(200)
-  .json(
-    new ApiResponse(200, user, "Cover Image updated successfully :)")
-  )
+    .status(200)
+    .json(new ApiResponse(200, user, "Cover Image updated successfully :)"));
 });
+
+const getUserChannelProfile = asyncHandler(async (req, res) => {
+  const { userName } = req.params;
+
+  if (!userName?.trim()) {
+    throw new ApiError(400, "Username is missing :)");
+  }
+
+  const channel = await User.aggregate([
+    {
+      $match: {
+        userName: userName?.toLowerCase(),
+      },
+    },
+    {
+      $lookup: {
+        from: "subscriptions",
+        localField: "_id",
+        foreignField: "channel",
+        as: "subscribers",
+      },
+    },
+    {
+      $lookup: {
+        from: "subscriptions",
+        localField: "_id",
+        foreignField: "subscriber",
+        as: "subscribedTo",
+      },
+    },
+    {
+      $addFields: {
+        subscriberCount: {
+          $size: "$subscribers",
+        },
+        channelsSubscribedToCount: {
+          $size: "$subscribedTo",
+        },
+        isSubscribed: {
+          $cond: {
+            if: { $in: [req.user?._id, "$subscribers.subscriber"] },
+            then: true,
+            else: false,
+          },
+        },
+      },
+    },
+    {
+      $project: {
+        fullName: 1,
+        userName: 1,
+        subscriberCount: 1,
+        channelsSubscribedToCount: 1,
+        isSubscribed: 1,
+        avatar: 1,
+        coverImage: 1,
+        email: 1,
+      },
+    },
+  ]);
+
+  if (!channel?.length) {
+    throw new ApiError(400, "Channel does not exists :)");
+  }
+
+  res
+    .status(200)
+    .json(
+      new ApiResponse(200, channel[0], "User channel fetches successfully :)")
+    );
+});
+
+const getWatchHistory = asyncHandler(async (req, res) => {})
 
 export {
   registerUser,
@@ -286,4 +360,7 @@ export {
   updateAccountDetails,
   updateUserAvatar,
   updateUserCoverImage,
+  getUserChannelProfile,
+  getWatchHistory,
+  refreshAccessToken
 };
